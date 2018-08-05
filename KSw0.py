@@ -1,5 +1,16 @@
 """
 first version of Kalman smoother with edge preserving functional...
+
+This can actually be re-written to be really fast because 
+the only true inverse covariance matrices are 3x3...
+    --> so can do these analytically really easy!
+
+Then other dot products can be done as array multiplications and summations...
+
+
+
+
+
 """
 import numpy as np
 from kernels import *
@@ -249,26 +260,37 @@ qa[30:50]=False
 """
 ff = glob.glob("/data/geospatial_19/ucfajlg/fire/Angola/time_series/*txt")
 
-doy, qa, rho, kerns  = loader2(ff[4444])
+doy, qa, rho, kerns  = loader2(ff[111])
 doy -= doy.min()
 #qa[27:50]=False
 
 k = KSw(doy, qa, rho, kerns)
-
-
-%lprun -f k.solve k.solve()
-
-
+k.solve()
 xs = k.xs
 Cs = k.Cs
 w = k.w 
 
 
-plt.plot(xs[:, 3], 'r.-')
-plt.plot(xs[:, 3] + Cs[:, 3,3], 'gray', lw=1)
-plt.plot(xs[:, 3] - Cs[:, 3,3], 'gray', lw=1)
+#plt.plot(Cs[:, 3*band,3*band])
+
+#%lprun -f k.solve k.solve()
+
+
+
+
+band = 3
+
+plt.plot(xs[:, 3*band], 'r.-')
+plt.plot(xs[:, 3*band] + 2*Cs[:, 3*band,3*band], 'gray', lw=1)
+plt.plot(xs[:, 3*band] - 2*Cs[:, 3*band,3*band], 'gray', lw=1)
 #plt.plot(xs[:, 4])
 #plt.plot(xs[:, 5])
-plt.plot(doy[qa], rho[qa,1], '+-', lw=0.5)
-plt.plot(w[:, 1], '.k')
+plt.plot(doy[qa], rho[qa,band], '+-', lw=0.5)
+plt.plot(w[:, band], '.k')
 plt.ylim(0,1)
+
+
+
+
+
+

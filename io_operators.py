@@ -168,10 +168,22 @@ class observations(object):
     because this can just be updated each n months with the new obs etc
 
     """
-    def __init__(self, zero_date=None, analysis_length=120,
+    def __init__(self,
+                tile = 'h30v10'
+                xmin = 0,
+                ymin = 0,
+                xmax = 240
+                ymax = 240,
+                zero_date=None,
+                analysis_length=120,
                     pre_wing_days=60, post_wing_days=60):
         """
         """
+        self.tile = tile
+        self.xmin = xmin
+        self.ymin = ymin
+        self.xmax = xmax
+        self.ymax = ymax
         self.zero_date = zero_date
         self.analysis_length = analysis_length
         self.pre_wing_days = pre_wing_days
@@ -184,6 +196,15 @@ class observations(object):
         # calculate end date
         self.end_date = zero_date + datetime.timedelta(analysis_length)
         self.first = True
+
+        """
+        Load the MODIS observations
+        """
+        self.MOD09 = MODIS_refl(self.tile, self.wing_pre,
+                                self.end_date, self.xmin,
+                                self.ymin, self.xmax, self.ymax)
+
+
 
     def advance(self):
         """

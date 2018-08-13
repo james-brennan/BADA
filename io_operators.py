@@ -13,9 +13,12 @@ complex. But can be aided by making lots of vrt files for:
 each organise by year and doy.
 
 """
-
-
-
+import numpy as np
+from kernels import *
+import glob
+import gdal
+import h5py
+import datetime
 
 """
 *-- MODIS related IO functions --*
@@ -83,75 +86,87 @@ class MODIS_refl(object):
         data['sensor']=sens[idx-1]
         return data
 
-def loadData(self, tile, beginning, ending, xmin, xmax, ymin, ymax):
-    """
-    Loads the modis refl and active fires
-    for the time-span
-    """
-    # cba re-writing...
-    tile = self.tile
-    xmin =self.xmin
-    xmax = selfxmax
-    ymin = self.ymin
-    ymax = self.ymax
-    beginning = self.stat_date
-    ending = self.end_date
-    # figure what dates we need
-    ndays = (ending-beginning).days
-    dates = np.array([beginning + datetime.timedelta(days=x) for x in range(0, ndays)])
-    """
-    for a date
-    load the necessary band
-    """
-    datas = {}
-    # add stuff
-    datas['qa'] = []
-    datas['refl'] = []
-    datas['date'] = []
-    datas['vza'] = []
-    datas['sza'] = []
-    datas['raa'] = []
-    datas['sensor']=[]
-    ida = 0
-    n = len(dates)
-    for date in dates:
-        data = self.vrt_loader(tile, date, xmin, ymin, xmax, ymax)
-        # do qa
-        qa = self.apply_qa(data['qa'])
-        datas['qa'].append(qa)
-        refl = np.stack(([data['brdf%i' % b] for b in xrange(1,8)]))
-        refl = np.swapaxes(refl, 0,1 )
-        refl = refl.astype(float)
-        refl *= 0.0001
+    def loadData(self):
         """
-        Fix aqua band
+        Loads the modis refl and active fires
+        for the time-span
         """
-        band6 = refl[:, 5]>0.0
-        qa = np.logical_and(qa, band6)
-        datas['date'].append(data['dates'])
+        # cba re-writing...
+        tile = self.tile
+        xmin =self.xmin
+        xmax = self.xmax
+        ymin = self.ymin
+        ymax = self.ymax
+        xs = xmax - xmin 
+        ys = ymax - ymin
+        beginning = self.start_date
+        ending = self.end_date
+        # figure what dates we need
+        ndays = (ending-beginning).days
+        dates = np.array([beginning + datetime.timedelta(days=x) for x in range(0, ndays)])
         """
-        fix mask errors
-        due to band6
+        for a date
+        load the necessary band
         """
-        datas['sensor'].append(data['sensor'])
-        datas['refl'].append( refl )
-        datas['vza'].append( data['vza']*0.01 )
-        datas['sza'].append( data['sza']*0.01 )
-        datas['raa'].append( (data['vaa']*0.01 - data['saa']*0.01).astype( np.float32 ))
-        ida += 1
-    # fix structure
-    datas['refl'] = np.vstack(datas['refl'])
-    datas['qa'] = np.vstack(datas['qa'])
-    datas['vza'] = np.vstack(datas['vza']).astype(float)
-    datas['sza'] = np.vstack(datas['sza']).astype(float)
-    datas['raa'] = np.vstack(datas['raa']).astype(float)
-    datas['date'] = np.hstack(datas['date'])
-    datas['sensor'] = np.hstack(datas['sensor'])
-    self.data = datas
-    return None
+        datas = {}
+        # add stuff
+        datas['qa'] = []
+        datas['refl'] = []
+        datas['date'] = []
+        datas['vza'] = []
+        datas['sza'] = []
+        datas['raa'] = []
+        datas['sensor']=[]
+        ida = 0
+        n = len(dates)
+        for date in dates:
+            data = self.vrt_loader(tile, date, xmin, ymin, xmax, ymax)
+            # do qa
+            qa = self.apply_qa(data['qa'])
+            datas['qa'].append(qa)
+            refl = np.stack(([data['brdf%i' % b] for b in xrange(1,8)]))
+            refl = np.swapaxes(refl, 0,1 )
+            refl = refl.astype(float)
+            refl *= 0.0001
+            """
+            Fix aqua band
+            """
+            band6 = refl[:, 5]>0.0
+            qa = np.logical_and(qa, band6)
+            datas['date'].append(data['dates'])
+            """
+            fix mask errors
+            due to band6
+            """
+            datas['sensor'].append(data['sensor'])
+            datas['refl'].append( refl )
+            datas['vza'].append( data['vza']*0.01 )
+            datas['sza'].append( data['sza']*0.01 )
+            datas['raa'].append( (data['vaa']*0.01 - data['saa']*0.01).astype( np.float32 ))
+            ida += 1
+        # fix structure
+        datas['refl'] = np.vstack(datas['refl'])
+        datas['qa'] = np.vstack(datas['qa'])
+        datas['vza'] = np.vstack(datas['vza']).astype(float)
+        datas['sza'] = np.vstack(datas['sza']).astype(float)
+        datas['raa'] = np.vstack(datas['raa']).astype(float)
+        datas['date'] = np.hstack(datas['date'])
+        datas['sensor'] = np.hstack(datas['sensor'])
 
-
-
+        """
+        Make kernels too
+        """
+        ts = datas['vza'].shape[0]
+        kerns =  Kernels(datas['vza'], datas['sza'], datas['raa'],
+                        LiType='Sparse', doIntegrals=False,
+                        normalise=True, RecipFlag=True, RossHS=False, MODISSPARSE=True,
+                        RossType='Thick',nbar=0.0)
+        kerns.Ross = kerns.Ross.reshape((ts, ys, xs))
+        kerns.Li = kerns.Li.reshape((ts, ys, xs))
+        kerns.Isotropic = kerns.Isotropic.reshape((ts, ys, xs))
+        datas['kernels'] = kerns
+        self.data = datas
+        return None
 
 
 
@@ -169,10 +184,10 @@ class observations(object):
 
     """
     def __init__(self,
-                tile = 'h30v10'
+                tile = 'h30v10',
                 xmin = 0,
                 ymin = 0,
-                xmax = 240
+                xmax = 240,
                 ymax = 240,
                 zero_date=None,
                 analysis_length=120,
@@ -203,8 +218,7 @@ class observations(object):
         self.MOD09 = MODIS_refl(self.tile, self.wing_pre,
                                 self.end_date, self.xmin,
                                 self.ymin, self.xmax, self.ymax)
-
-
+        self.MOD09.loadData()
 
     def advance(self):
         """
@@ -220,3 +234,45 @@ class observations(object):
         if not self.first:
             self.wing_pre = None
             self.wing_post =  self.end_date + datetime.timedelta(post_wing_days)
+
+
+
+def create_outfile(tile, ):
+    AUXDIRECTORY = "/group_workspaces/cems2/nceo_generic/users/jbrennan01/BADA/aux/"
+    """
+    make dirs
+    """
+    outfile = h5py.File( AUXDIRECTORY +'/'+'%s_BRDFstate_.hdf5' % (tile),'w')
+    ks = outfile.create_dataset("state", (136, 7, 3, 2400, 2400), dtype="f4", chunks=(136, 7, 3, 256, 256))
+    ks_unc = outfile.create_dataset("unc", (136, 7, 3, 2400, 2400), dtype="f4", chunks=(136, 7, 3, 256, 256))
+    file = outfile
+    return file, ks, ks_unc
+
+
+class output_handler(object):
+    """
+    This class helps the output writing stuff
+    eg it creates output files and writes to them
+    """
+    def __init__(self, tile, zero_date ):
+        """
+        """
+        self.OUTDIRECTORY = "/group_workspaces/cems2/nceo_generic/users/jbrennan01/BADA/outputs/"
+        self.AUXDIRECTORY = "/group_workspaces/cems2/nceo_generic/users/jbrennan01/BADA/aux/"
+        """
+        make dirs
+        """
+        outfile = h5py.File( self.AUXDIRECTORY +'/'+'%s_BRDFstate_.hdf5' % (tile),'w')
+        # and for now store evols
+        self.ks = outfile.create_dataset("state", (136, 7, 3, 2400, 2400), dtype="f4", chunks=(136, 7, 3, 256, 256))
+        self.ks_unc = outfile.create_dataset("unc", (136, 7, 3, 2400, 2400), dtype="f4", chunks=(136, 7, 3, 256, 256))
+        self.file = outfile
+
+    def write(self, state, unc, x0, x1, y0, y1):
+        """
+        write a chunk of data
+        """
+        self.ks[:, :, :, y0:y1, x0:x1] = state
+        self.ks_unc[:, :, :, y0:y1, x0:x1] = unc
+
+

@@ -91,9 +91,9 @@ if __name__ == "__main__":
     x1 = options.xmax
     y1 = options.ymax
     if options.ymax == None:
-        y1 = y0 + 20
+        y1 = y0 + 120
     if options.xmax == None:
-        x1 = x0 + 20
+        x1 = x0 + 120
     # force limit just incase
     x1 = np.minimum(x1, 2400)
     y1 = np.minimum(y1, 2400)
@@ -112,9 +112,9 @@ if __name__ == "__main__":
     logger = logging.getLogger(__name__)
     syslog = logging.StreamHandler()
     formatter = logging.Formatter('%(extra)s %(asctime)s - %(message)s')
-    syslog.setFormatter(formatter)
+    #syslog.setFormatter(formatter)
     logger.setLevel(logging.INFO)
-    logger.addHandler(syslog)
+    #logger.addHandler(syslog)
     # create a file handler
     handler = logging.FileHandler('log.log')
     handler.setLevel(logging.INFO)
@@ -151,7 +151,7 @@ if __name__ == "__main__":
     -- figure out the necessary size of the arrays
 
     """
-    nT = analysis_length + pre_wing_days
+    nT = analysis_length + 16
 
 
 
@@ -218,7 +218,7 @@ if __name__ == "__main__":
                     fcc_uncs[t+2, :, :,y, x] = -998.
     t1 = time.time()
     logger.info("fcc calculation took %f seconds" % (t1-t0))
-
+    #import pdb; pdb.set_trace()
     """
     do pb classifier
     """
@@ -236,6 +236,9 @@ if __name__ == "__main__":
                     pb[t+2, y, x] = _pb
     t1 = time.time()
     logger.info("pb calculation took %f seconds" % (t1-t0))
+
+    # if p_b is nan set to 0
+    pb[~np.isfinite(pb)]=0.0
 
     """
     Save outputs

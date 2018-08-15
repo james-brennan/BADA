@@ -51,15 +51,15 @@ def _inverseCov(Cov, outArr):
 
 
 class KSw_vNIR(object):
-    def __init__(self, doy, qa, rho, isoK, volK, geoK):
+    def __init__(self, dates, qa, rho, isoK, volK, geoK):
         """
         This version just does the iteration on the NIR
         and then applies the w to other bands
 
         """
         # convert dates to doys
-        self.doy = np.array([int(d.strftime("%j")) for d in doy])
-        self.doy -= self.doy.min()
+        self.dates = dates
+        self.doy = np.array([int(d.strftime("%j")) for d in self.dates])
         self.rho = rho
         self.qa = qa
         self.qa = np.logical_and(self.qa, self.rho[:, 5]>0)
@@ -71,13 +71,22 @@ class KSw_vNIR(object):
         eventually write this to do all obs per day...
         """
         #import pdb; pdb.set_trace()
-        _, keep = np.unique(self.doy, return_index=True)
+        _, keep = np.unique(self.dates, return_index=True)
         self.doy = self.doy[keep]
+        self.dates = self.dates[keep]
         self.qa = self.qa[keep]
         self.isoK = self.isoK[keep]
         self.volK = self.volK[keep]
         self.geoK = self.geoK[keep]
         self.rho = self.rho[keep]
+
+        # adjust fake doy
+        self.year = np.array([int(d.strftime("%Y")) for d in self.dates])
+        self.year -= self.year.min()
+        # this should approximately work...
+        self.doy = self.year * 365 + self.doy
+        self.doy -= self.doy.min()
+
 
     def _prepare_matrices(self):
         """
@@ -160,7 +169,7 @@ class KSw_vNIR(object):
         This runs the kalman smoother several times and updates
         the edge process weighting
 
-        BUT JUST on the NIR band        
+        BUT JUST on the NIR band
         """
         # localised
         rho = self.rho
@@ -258,7 +267,7 @@ class KSw_vNIR(object):
                     # Get the observation operator
                     Ht = self.H[t]
                     # Predict reflectance
-                    pred = Ht.dot(x_t)# (Ht * x_t).sum()  
+                    pred = Ht.dot(x_t)# (Ht * x_t).sum()
                     """
                     Get innovation error
                     """
@@ -305,6 +314,15 @@ class KSw_vNIR(object):
             """
             Cs_nir[-1]=C_nir[-1]
             xs_nir[-1]=x_nir[-1]
+
+            """
+            *-- prototype outlier --*
+
+            Just compute from the smoothed
+            estimate the z-score residual
+            """
+            self.z_score = np.zeros(self.nT)
+
             for t in np.arange(doy.min(), doy.max())[::-1]:
                 C_p_t1 = C_p_Nir[t+1]
                 C_tt = C_nir[t]
@@ -331,6 +349,8 @@ class KSw_vNIR(object):
                 _C_t = C_tt - K_t.dot(diff).dot(K_t.T)
                 xs_nir[t] = _x_t
                 Cs_nir[t] = _C_t
+                # outlier thing
+                self.z_score[t] =  (self.H[t].dot(_x_t) - self.rho[t, 1])**2/self.C_obs[1]
             """
             Calculate edge-preserving functional
             """
@@ -350,7 +370,19 @@ class KSw_vNIR(object):
             converged =  ( (np.abs(xs_nir[:, 0] - xs_0)).sum() < TOL)
             # propagate around the solution for next iteration
             xs_0 = np.copy(xs_nir[:, 0])
-        #print itera
+            """
+            update the outlier mask for the qa...
+
+            For now we specify a simple outlier model.
+
+            An observation is an outlier if the zscore
+            exceeds a 95\% threshold in the z_score values
+            """
+            if self.itera <= 2:
+                outliersT = np.nanpercentile(self.z_score[self.qa], 98)
+                outliers = self.z_score > outliersT
+                # update the qa
+                self.qa = np.logical_and(self.qa, ~outliers)
 
 
     def solve(self):
@@ -502,3 +534,4 @@ class KSw_vNIR(object):
                 _C_t = C_tt - K_t.dot(diff).dot(K_t.T)
                 self.xs[t, 3*band:(3*band+3)] = _x_t
                 self.Cs[t, 3*band:(3*band+3), :] = _C_t
+        #import pdb; pdb.set_trace()

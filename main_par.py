@@ -18,15 +18,17 @@ from kernels import Kernels
 from KSw0_vNIR import *
 from pb import Pb_MC
 import argparse
-
 import textwrap as _textwrap
+
+
 class MultilineFormatter(argparse.HelpFormatter):
     def _fill_text(self, text, width, indent):
         text = self._whitespace_matcher.sub(' ', text).strip()
         paragraphs = text.split('|n ')
         multiline_text = ''
         for paragraph in paragraphs:
-            formatted_paragraph = _textwrap.fill(paragraph, width, initial_indent=indent, subsequent_indent=indent) + '\n\n'
+            formatted_paragraph = _textwrap.fill(paragraph, width, initial_indent=indent, 
+                                                    subsequent_indent=indent) + '\n\n'
             multiline_text = multiline_text + formatted_paragraph
         return multiline_text
 
@@ -34,18 +36,6 @@ class MultilineFormatter(argparse.HelpFormatter):
 def mkdate(datestr):
     return datetime.datetime.strptime(datestr, '%Y-%m-%d')
 
-
-
-
-logoTxt = """\
- _______  _______  ______   _______
-|  _    ||   _   ||      | |   _   |
-| |_|   ||  |_|  ||  _    ||  |_|  |
-|       ||       || | |   ||       |
-|  _   | |       || |_|   ||       |
-| |_|   ||   _   ||       ||   _   |
-|_______||__| |__||______| |__| |__|
-"""
 
 logoTxt = """\
 ██████╗  █████╗ ██████╗  █████╗
@@ -71,38 +61,31 @@ BA retrieval.
 
 if __name__ == "__main__":
 
-
+    """
+    get options
+    """
     parser = argparse.ArgumentParser(description=helpTxt,  formatter_class=MultilineFormatter)
-    parser.add_argument('xmin', type=int,
-                        help='xmin of the processing')
     parser.add_argument('ymin',  type=int,
                         help='ymin of the processing')
-    parser.add_argument('--xmax',  type=int, default=None,
-                        help='xmax of the processing')
+    parser.add_argument('xmin', type=int,
+                        help='xmin of the processing')
     parser.add_argument('--ymax',  type=int, default=None,
                         help='ymax of the processing')
+    parser.add_argument('--xmax',  type=int, default=None,
+                        help='xmax of the processing')
+    parser.add_argument('--tile', default='h30v10')
     parser.add_argument('--start_date', type=mkdate, default='2008-03-05')
     parser.add_argument('--end_date', type=mkdate, default='2008-07-03')
-
-
     parser.add_argument('--outdir', dest='outdir',
                         default=None,
-                        help='specify a custom output directory for the files')
+                        help="""specify a custom output directory for the files.
+                             Otherwise a sub-directory determined by the tile. """)
     options = parser.parse_args()
 
-
-
-
-    """
-    Sort out logging file
-    """
-    logging.basicConfig(filename="log.log",
-                        format='%(asctime)s %(levelname)-8s %(message)s',
-                        level=logging.INFO,
-                        datefmt='%Y-%m-%d %H:%M:%S')
     """
     specify extents
     """
+    tile = options.tile
     y0 = options.ymin
     x0 = options.xmin
     x1 = options.xmax
@@ -116,21 +99,42 @@ if __name__ == "__main__":
     y1 = np.minimum(y1, 2400)
     xs = x1 - x0
     ys = y1 - y0
-
     # and dates
-
     date_0 = options.start_date
     date_1 = options.end_date
     analysis_length = (date_1 - date_0).days
+    doy0 = date_0.strftime("%j")
+    doy1 = date_1.strftime("%j")
 
-    logging.info("Processing %i %i" % (y0, x0))
+    """
+    Sort out logging file
+    """
+    logger = logging.getLogger(__name__)
+    syslog = logging.StreamHandler()
+    formatter = logging.Formatter('%(extra)s %(asctime)s - %(message)s')
+    syslog.setFormatter(formatter)
+    logger.setLevel(logging.INFO)
+    logger.addHandler(syslog)
+    # create a file handler
+    handler = logging.FileHandler('log.log')
+    handler.setLevel(logging.INFO)
+    handler.setFormatter(formatter)
+    # add the handlers to the logger
+    logger.addHandler(handler)
+
+
+    # extra info into the logger
+    extra = {'extra':'[%s | t0-t1: %s %s | xy: %i %i %i %i]' % (tile, doy0, doy1, y0, x0, y1, x1)}
+    logger = logging.LoggerAdapter(logger, extra)
+
+
+    # record logging
+    logger.info("Initiated processing. Load observations...")
 
     """
     Load observations
     """
-    tile = "h30v10"
-
-    obs = observations( tile=tile,
+    obs = observations( tile = tile,
                         xmin = x0,
                         ymin = y0,
                         xmax = x1,
@@ -140,12 +144,20 @@ if __name__ == "__main__":
                         pre_wing_days = 16,
                         post_wing_days = 16)
 
-    logging.info("Loaded obs for %i %i" % (y0, x0))
+    logger.info("Loaded observations")
     """
     make some local storage
+    
+    -- figure out the necessary size of the arrays
+
     """
-    state = -999*np.ones((136, 7, ys, xs))
-    state_unc = -999* np.ones((136, 7,  ys, xs))
+    nT = analysis_length + pre_wing_days
+
+
+
+
+    state = -999*np.ones((nT, 7, ys, xs))
+    state_unc = -999* np.ones((nT, 7,  ys, xs))
     iters = -999 *np.ones((ys, xs))
     """
     Run BRDF correction algorithm
@@ -174,21 +186,21 @@ if __name__ == "__main__":
                 for band in xrange(7):
                     state_unc[:, band, y,x] = k.Cs[:, 3*band:(3*band+3), :][:, 0, 0]
     t1 = time.time()
-    logging.info("That took %f seconds" % (t1-t0))
+    logger.info("BRDF correction took %f seconds" % (t1-t0))
 
 
     """
     And fcc storage
     """
-    fcc_params = -999*np.ones((136, 3, ys, xs))
-    fcc_uncs = -999*np.ones((136, 3, 3, ys, xs))
+    fcc_params = -999*np.ones((nT, 3, ys, xs))
+    fcc_uncs = -999*np.ones((nT, 3, 3, ys, xs))
     """
     Now do fcc
     """
     t0 = time.time()
     for y in xrange(ys):
         for x in xrange(xs):
-            for t in xrange(0, 136-2):
+            for t in xrange(0, nT-2):
                 pre_iso = state[t, :, y, x]
                 post_iso = state[t+2, :, y, x]
                 pre_unc =  state_unc[t, :, y, x]
@@ -205,36 +217,39 @@ if __name__ == "__main__":
                     fcc_params[t+2, 2, y, x] = -998.
                     fcc_uncs[t+2, :, :,y, x] = -998.
     t1 = time.time()
-    logging.info("fcc calculation took %f seconds" % (t1-t0))
-
+    logger.info("fcc calculation took %f seconds" % (t1-t0))
 
     """
     do pb classifier
     """
-    pb = -999*np.ones((136, ys, xs))
+    pb = -999*np.ones((nT, ys, xs))
     t0 = time.time()
     for y in xrange(ys):
         for x in xrange(xs):
-            for t in xrange(0, 136-2):
+            for t in xrange(0, nT-2):
                 fcc_p   = fcc_params[t+2, :, y, x]
                 fcc_unc = fcc_uncs[t+2, :, :,y, x]
                 if fcc_p[0] == -999 or fcc_p[0] == -998:
-                    pb[t+2, y, x] = -999
+                    pb[t+2, y, x] = -999.0
                 else:
                     _pb = Pb_MC(fcc_p, fcc_unc)
                     pb[t+2, y, x] = _pb
-        print y
     t1 = time.time()
-    logging.info("pb calculation took %f seconds" % (t1-t0))
-    import pdb; pdb.set_trace()
+    logger.info("pb calculation took %f seconds" % (t1-t0))
 
     """
     Save outputs
     """
-    odir = '/home/users/jbrennan01/DATA2/BADA/tmp/%s/' % tile
+    # also put into a subdirectory based on dates for multiple tiles...
+    logger.info("Going to write files...")
+
+    odir = '/home/users/jbrennan01/DATA2/BADA/tmp/%s/%s_%s/' % (tile, doy0, doy1)
     if not os.path.exists(odir):
         os.makedirs(odir)
-    np.save(odir+"%s_state_%f_%f" % (tile, y0, x0), state)
-    np.save(odir+"%s_iters_%f_%f" % (tile, y0, x0), iters)
-    np.save(odir+"%s_fcc_%f_%f" % (tile, y0, x0), fcc_params)
-    np.save(odir+"%s_pb_%f_%f" % (tile, y0, x0), pb)
+    # too big...
+    #np.save(odir+"%s_state_%f_%f" % (tile, y0, x0), state)
+    np.save(odir+"%s_iters_%i_%i_%s_%s" % (tile, y0, x0, doy0, doy1), iters)
+    np.save(odir+"%s_fcc_%i_%i_%s_%s" % (tile, y0, x0, doy0, doy1), fcc_params)
+    np.save(odir+"%s_pb_%i_%i_%s_%s" % (tile, y0, x0, doy0, doy1), pb)
+    # finish logging
+    logger.info("Files written. BADA finished. ")

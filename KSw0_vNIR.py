@@ -70,7 +70,6 @@ class KSw_vNIR(object):
         make life easier by keeping only one ob per day
         eventually write this to do all obs per day...
         """
-        #import pdb; pdb.set_trace()
         _, keep = np.unique(self.dates, return_index=True)
         self.doy = self.doy[keep]
         self.dates = self.dates[keep]
@@ -158,7 +157,6 @@ class KSw_vNIR(object):
         """
         Add the initial condition to time-step 1
         """
-        #import pdb; pdb.set_trace()
         self.x[0, :] = np.hstack(xx)
         self.C[0, :] = np.vstack(cc)
 
@@ -179,7 +177,7 @@ class KSw_vNIR(object):
         Some constants
         """
         TOL = 1e-2
-        MAX_ITER = 10
+        MAX_ITER = 20
         """
         This controls convergence for different pixels
         eg if a pixel has converged we change the flag and therefore
@@ -216,10 +214,12 @@ class KSw_vNIR(object):
 
 
         self.badDets = np.zeros(self.nT).astype(np.bool)
-
+        self.SSE_t = 0
+        self.SSE_0 = 1e9
+        SSE_ITER = []
         while converged==False and self.itera < MAX_ITER:
             # reset the SSE counter
-            SSE *= 0.0
+            self.SSE_t *= 0.0
             self.itera +=1
             #print iter
             """
@@ -231,7 +231,6 @@ class KSw_vNIR(object):
                 previous time-step which corresponds to
                 a 0-th order process model
                 """
-                #import pdb; pdb.set_trace()
                 x_t = x_nir[t-1]
                 C_t = C_nir[t-1]
                 # apply the stand process mode noise
@@ -272,10 +271,6 @@ class KSw_vNIR(object):
                     Get innovation error
                     """
                     residual = rho_nir[t] - pred
-                    """
-                    Update sum of squared errors
-                    """
-                    SSE+= (residual**2)
                     """
                     The innovation covariance matrix S
                     usual
@@ -322,7 +317,7 @@ class KSw_vNIR(object):
             estimate the z-score residual
             """
             self.z_score = np.zeros(self.nT)
-
+            self.pred = np.zeros(self.nT)
             for t in np.arange(doy.min(), doy.max())[::-1]:
                 C_p_t1 = C_p_Nir[t+1]
                 C_tt = C_nir[t]
@@ -350,15 +345,17 @@ class KSw_vNIR(object):
                 xs_nir[t] = _x_t
                 Cs_nir[t] = _C_t
                 # outlier thing
-                self.z_score[t] =  (self.H[t].dot(_x_t) - self.rho[t, 1])**2/self.C_obs[1]
+                predicted = self.H[t].dot(_x_t)
+                self.pred[t] = predicted
+                self.z_score[t] =  (predicted - self.rho[t, 1])**2/self.C_obs[1]
+                self.SSE_t += (predicted - self.rho[t, 1])**2
             """
             Calculate edge-preserving functional
             """
             # note we don't use 1 over here but increase the unc instead...
-            self.w[:] =  (1 + 4e3 * np.gradient(xs_nir[:, 0])**2)
+            self.w[:] =  (1 + 1e3 * np.gradient(xs_nir[:, 0])**2)
             # update error
-            err_0 = err_1
-            err_1 = SSE
+            SSE_ITER.append( self.SSE_t )
             # check per-pixel convergence
             #converged = np.abs(SSE - err_0) < TOL
             """
@@ -366,8 +363,28 @@ class KSw_vNIR(object):
             has the solution stopped changing much?
             [description]
             """
-            #import pdb; pdb.set_trace()
-            converged =  ( (np.abs(xs_nir[:, 0] - xs_0)).sum() < TOL)
+            #converged =  ( (np.abs(xs_nir[:, 0] - xs_0)).sum() < TOL)
+            """
+            error based convergence...?
+            """
+            # check convergence
+            """
+            two convergence terms
+
+            1. decrease in the SSE
+            2. rel. change in SSE is sufficently large to bother
+                continuing
+            """
+            TOL = 1e-3
+            # false == convergence
+            critera_1 =  self.SSE_t < self.SSE_0
+            # true == convergence
+            critera_2 = np.abs((self.SSE_t - self.SSE_0) / self.SSE_0) < TOL
+            # 
+            converged = (critera_1 ==False or critera_2==True) and self.itera > 2
+            print self.itera, critera_1, critera_2, np.abs((self.SSE_t - self.SSE_0) / self.SSE_0)
+            # update errors
+            self.SSE_0 = self.SSE_t
             # propagate around the solution for next iteration
             xs_0 = np.copy(xs_nir[:, 0])
             """
@@ -383,7 +400,6 @@ class KSw_vNIR(object):
                 outliers = self.z_score > outliersT
                 # update the qa
                 self.qa = np.logical_and(self.qa, ~outliers)
-
 
     def solve(self):
         """

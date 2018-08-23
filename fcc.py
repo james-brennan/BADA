@@ -1,8 +1,8 @@
 """
 fcc.py
-""" 
+"""
 import numpy as np
-import scipy.stats 
+import scipy.stats
 
 
 def fccModel(pre_fire, post_fire, pre_unc, post_unc):
@@ -53,12 +53,11 @@ def fccModel(pre_fire, post_fire, pre_unc, post_unc):
     Make covariance matrix
     """
     CInv = np.diag(1/chngUnc**2)
-
+    C = np.diag(chngUnc**2)
     #import pdb; pdb.set_trace()
     KTK = K.T.dot(CInv).dot(K)
     KTy = K.T.dot(CInv).dot(y)
     sP = np.linalg.solve(KTK, KTy)
-    #sP,residual, rank,singular_vals = np.linalg.lstsq ( K, y )
     #Uncertainty
     inv = np.linalg.inv ( KTK )
     #    (fccUnc, a0Unc, a1Unc ) = \
@@ -69,9 +68,15 @@ def fccModel(pre_fire, post_fire, pre_unc, post_unc):
     fcc = -sP[2]
     a0 = sP[0]/fcc
     a1 = sP[1]/fcc
-    #sBurn = a0 + lk*a1
-    #sFWD = pre_fire*(1-fcc) + fcc*sBurn
-    #import pdb; pdb.set_trace()
-    return fcc, a0, a1, inv
+    # get RMSE?
+    e = (K.dot(sP) - y)**2
+    RMSE = np.sqrt( e.sum()/7.0  )
 
 
+    """
+    return the likelihood of this...
+    """
+    exp = (K.dot(sP) - y).dot(CInv).dot(K.dot(sP)-y)
+    const = np.sqrt( (2*np.pi)**7 * np.linalg.det(C)  )
+    L =   const * np.exp( - 0.5 * exp)
+    return fcc, a0, a1, inv, RMSE, L

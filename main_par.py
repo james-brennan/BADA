@@ -16,10 +16,10 @@ from fcc import fccModel
 from io_operators import observations, output_handler
 from kernels import Kernels
 from KSw0_vNIR import *
-from pb import Pb_MC
+from pb import Pb_MC, PB2, PB3, PB4
 import argparse
 import textwrap as _textwrap
-
+import pylab as plt
 
 class MultilineFormatter(argparse.HelpFormatter):
     def _fill_text(self, text, width, indent):
@@ -27,7 +27,7 @@ class MultilineFormatter(argparse.HelpFormatter):
         paragraphs = text.split('|n ')
         multiline_text = ''
         for paragraph in paragraphs:
-            formatted_paragraph = _textwrap.fill(paragraph, width, initial_indent=indent, 
+            formatted_paragraph = _textwrap.fill(paragraph, width, initial_indent=indent,
                                                     subsequent_indent=indent) + '\n\n'
             multiline_text = multiline_text + formatted_paragraph
         return multiline_text
@@ -103,6 +103,15 @@ if __name__ == "__main__":
     date_0 = options.start_date
     date_1 = options.end_date
     analysis_length = (date_1 - date_0).days
+    """
+    If the analysis length is less than 120 increase to 120
+    """
+    #import pdb; pdb.set_trace()
+    if analysis_length < 120:
+        date_1 += datetime.timedelta(int((120-analysis_length)/2))
+        date_0 -= datetime.timedelta(int((120-analysis_length)/2))
+        analysis_length = (date_1 - date_0).days
+    # convert to strings too
     doy0 = date_0.strftime("%j")
     doy1 = date_1.strftime("%j")
 
@@ -147,7 +156,7 @@ if __name__ == "__main__":
     logger.info("Loaded observations")
     """
     make some local storage
-    
+
     -- figure out the necessary size of the arrays
 
     """
@@ -188,15 +197,14 @@ if __name__ == "__main__":
     t1 = time.time()
     logger.info("BRDF correction took %f seconds" % (t1-t0))
 
-
     """
-    And fcc storage
+    try new model
     """
+    pb2 = -999*np.ones((nT, ys, xs))
     fcc_params = -999*np.ones((nT, 3, ys, xs))
-    fcc_uncs = -999*np.ones((nT, 3, 3, ys, xs))
-    """
-    Now do fcc
-    """
+    a0 = -999*np.ones((nT, ys, xs))
+    a1 = -999*np.ones((nT, ys, xs))
+
     t0 = time.time()
     for y in xrange(ys):
         for x in xrange(xs):
@@ -206,53 +214,49 @@ if __name__ == "__main__":
                 pre_unc =  state_unc[t, :, y, x]
                 post_unc =  state_unc[t+2, :, y, x]
                 try:
-                    _fcc, _a0, _a1, _fcc_uncs = fccModel(pre_iso, post_iso, pre_unc, post_unc)
+                    #import pdb; pdb.set_trace()
+                    _pb, _fcc, _a0, _a1 = PB2(pre_iso, post_iso, pre_unc, post_unc)
+                    pb2[t+2, y, x] = _pb
                     fcc_params[t+2, 0, y, x] = _fcc
                     fcc_params[t+2, 1, y, x] = _a0
                     fcc_params[t+2, 2, y, x] = _a1
-                    fcc_uncs[t+2, :, :,y, x] = _fcc_uncs
                 except:
-                    fcc_params[t+2, 0, y, x] = -998.
-                    fcc_params[t+2, 1, y, x] = -998.
-                    fcc_params[t+2, 2, y, x] = -998.
-                    fcc_uncs[t+2, :, :,y, x] = -998.
-    t1 = time.time()
-    logger.info("fcc calculation took %f seconds" % (t1-t0))
-    #import pdb; pdb.set_trace()
-    """
-    do pb classifier
-    """
-    pb = -999*np.ones((nT, ys, xs))
-    t0 = time.time()
-    for y in xrange(ys):
-        for x in xrange(xs):
-            for t in xrange(0, nT-2):
-                fcc_p   = fcc_params[t+2, :, y, x]
-                fcc_unc = fcc_uncs[t+2, :, :,y, x]
-                if fcc_p[0] == -999 or fcc_p[0] == -998:
-                    pb[t+2, y, x] = -999.0
-                else:
-                    _pb = Pb_MC(fcc_p, fcc_unc)
-                    pb[t+2, y, x] = _pb
-    t1 = time.time()
-    logger.info("pb calculation took %f seconds" % (t1-t0))
+                    pb2[t+2, y, x] = -998
+                    fcc_params[t+2, 0, y, x] =  -998
+                    fcc_params[t+2, 1,y, x] =  -998
+                    fcc_params[t+2, 2,y, x] =  -998
 
-    # if p_b is nan set to 0
-    pb[~np.isfinite(pb)]=0.0
+    t1 = time.time()
+    logger.info("fcc/pb calculation took %f seconds" % (t1-t0))
 
-    """
-    Save outputs
-    """
+
     # also put into a subdirectory based on dates for multiple tiles...
     logger.info("Going to write files...")
 
     odir = '/home/users/jbrennan01/DATA2/BADA/tmp/%s/%s_%s/' % (tile, doy0, doy1)
     if not os.path.exists(odir):
         os.makedirs(odir)
-    # too big...
-    #np.save(odir+"%s_state_%f_%f" % (tile, y0, x0), state)
+
+
+    pbMax = np.nanmax(pb2, axis=0)
+    pbMax = np.nanmax(pb2, axis=0)
+    cc = np.ma.array(data=pb2, mask=~np.isfinite(pb2) )
+    idx = cc.argmax(axis=0)
+    fcc_parB = -999*np.ones((3, ys, xs))
+    for y in xrange(ys):
+        for x in xrange(xs):
+           fcc_parB[:, y, x] = fcc_params[idx[y,x], :, y, x] 
+
+    #np.save(odir+"%s_iters_%i_%i_%s_%s" % (tile, y0, x0, doy0, doy1), iters)
+    #np.save(odir+"%s_fcc_%i_%i_%s_%s" % (tile, y0, x0, doy0, doy1), fcc_parB)
+    #np.save(odir+"%s_pb2_%i_%i_%s_%s" % (tile, y0, x0, doy0, doy1), pbMax)
+    # finish logging
+    #logger.info("Files written. BADA finished. ")
+
+
+
     np.save(odir+"%s_iters_%i_%i_%s_%s" % (tile, y0, x0, doy0, doy1), iters)
     np.save(odir+"%s_fcc_%i_%i_%s_%s" % (tile, y0, x0, doy0, doy1), fcc_params)
-    np.save(odir+"%s_pb_%i_%i_%s_%s" % (tile, y0, x0, doy0, doy1), pb)
-    # finish logging
+    np.save(odir+"%s_pb2_%i_%i_%s_%s" % (tile, y0, x0, doy0, doy1), pb2)
+    ## finish logging
     logger.info("Files written. BADA finished. ")

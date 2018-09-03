@@ -11,7 +11,7 @@ import scipy.linalg
 import glob
 import datetime
 from numba import jit
-
+import matplotlib.pyplot as plt
 
 """
 These are numba compiled utility functions
@@ -111,6 +111,7 @@ class KSw_vNIR(object):
         edge preserving functional
         """
         self.w = np.ones(self.nT)
+        self.wg = np.ones(self.nT)
         """
         Specify the observation error covariance
         """
@@ -212,11 +213,11 @@ class KSw_vNIR(object):
 
         xs_0 = np.copy(xs_nir[:, 0])*0.0
 
-
         self.badDets = np.zeros(self.nT).astype(np.bool)
         self.SSE_t = 0
         self.SSE_0 = 1e9
         SSE_ITER = []
+
         while converged==False and self.itera < MAX_ITER:
             # reset the SSE counter
             self.SSE_t *= 0.0
@@ -353,9 +354,22 @@ class KSw_vNIR(object):
             Calculate edge-preserving functional
             """
             # note we don't use 1 over here but increase the unc instead...
-            self.w[:] =  (1 + 1e3 * np.gradient(xs_nir[:, 0])**2)
+            self.w[1:] =  (1 + 1e3 * np.diff(xs_nir[:, 0])**2)
+            #gunc = np.sqrt((Cs_nir[1:, 0,0 ] + Cs_nir[:1, 0,0 ])/2.0)
+            #ppwu = (np.gradient(xs_nir[:, 0])**2)[1:]  / gunc
+            #ppw = np.diff(xs_nir[:, 0])**2
+            # OVER-WRITING
+            #self.w[1:]  = np.sqrt( 1 + 1 * ppwu  )
+            #_store_w.append(  self.w    )
+            #_store_gw.append(self.wg)
+            #G.append(gunc[48])
+            #D.append((np.gradient(xs_nir[:, 0])**2)[1:][48])
+            """
+            new idea
+            use the deriv info with the unc info...
+            """
             # update error
-            SSE_ITER.append( self.SSE_t )
+            #SSE_ITER.append( self.SSE_t )
             # check per-pixel convergence
             #converged = np.abs(SSE - err_0) < TOL
             """
@@ -375,14 +389,18 @@ class KSw_vNIR(object):
             2. rel. change in SSE is sufficently large to bother
                 continuing
             """
-            TOL = 1e-3
+            TOL = 1e-1
             # false == convergence
             critera_1 =  self.SSE_t < self.SSE_0
             # true == convergence
             critera_2 = np.abs((self.SSE_t - self.SSE_0) / self.SSE_0) < TOL
+            #import pdb;pdb.set_trace()
+            critera_3 = (np.abs(xs_nir[:, 0] - xs_0)).sum() < TOL
             # 
             converged = (critera_1 ==False or critera_2==True) and self.itera > 2
-            print self.itera, critera_1, critera_2, np.abs((self.SSE_t - self.SSE_0) / self.SSE_0)
+            converged = critera_3
+            #converged = self.itera > 10
+            #print self.itera, critera_1, critera_2, np.abs((self.SSE_t - self.SSE_0) / self.SSE_0)
             # update errors
             self.SSE_0 = self.SSE_t
             # propagate around the solution for next iteration

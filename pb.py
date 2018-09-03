@@ -302,7 +302,7 @@ def PB2(pre, post, pre_unc, post_unc):
     #pre_unc = np.sqrt(pre_unc)
     #post_unc = np.sqrt(post_unc)
     #chngUnc = 2*np.sqrt(pre_unc**2 + post_unc**2) ## ((bu*pre_unc)**2 + (bu*post_unc)**2)
-    chngUnc = np.sqrt(pre_unc**2 + post_unc**2)
+    chngUnc = pre_unc  + post_unc
     """
     calculate the values of f(ll)
     """
@@ -328,8 +328,8 @@ def PB2(pre, post, pre_unc, post_unc):
     """
     Make covariance matrix
     """
-    CInv = np.diag(1/chngUnc**2)
-    C = np.diag(chngUnc**2)
+    CInv = np.diag(1/chngUnc)
+    C = np.diag(chngUnc)
     #import pdb; pdb.set_trace()
     KTK = K.T.dot(CInv).dot(K)
     KTy = K.T.dot(CInv).dot(y)

@@ -69,7 +69,9 @@ class KSw_vNIR(object):
         """
         make life easier by keeping only one ob per day
         eventually write this to do all obs per day...
+        -- need to do this!!
         """
+        import pdb; pdb.set_trace()
         _, keep = np.unique(self.dates, return_index=True)
         self.doy = self.doy[keep]
         self.dates = self.dates[keep]
@@ -110,7 +112,7 @@ class KSw_vNIR(object):
         """
         edge preserving functional
         """
-        self.w = np.ones(self.nT)
+        self.w = np.ones(self.nT).astype(np.float)
         self.wg = np.ones(self.nT)
         """
         Specify the observation error covariance
@@ -354,34 +356,13 @@ class KSw_vNIR(object):
             Calculate edge-preserving functional
             """
             # note we don't use 1 over here but increase the unc instead...
-            self.w[1:] =  (1 + 1e3 * np.diff(xs_nir[:, 0])**2)
-            #gunc = np.sqrt((Cs_nir[1:, 0,0 ] + Cs_nir[:1, 0,0 ])/2.0)
-            #ppwu = (np.gradient(xs_nir[:, 0])**2)[1:]  / gunc
-            #ppw = np.diff(xs_nir[:, 0])**2
-            # OVER-WRITING
-            #self.w[1:]  = np.sqrt( 1 + 1 * ppwu  )
-            #_store_w.append(  self.w    )
-            #_store_gw.append(self.wg)
-            #G.append(gunc[48])
-            #D.append((np.gradient(xs_nir[:, 0])**2)[1:][48])
-            """
-            new idea
-            use the deriv info with the unc info...
-            """
-            # update error
-            #SSE_ITER.append( self.SSE_t )
-            # check per-pixel convergence
-            #converged = np.abs(SSE - err_0) < TOL
-            """
-            different convergence...
-            has the solution stopped changing much?
-            [description]
-            """
-            #converged =  ( (np.abs(xs_nir[:, 0] - xs_0)).sum() < TOL)
-            """
-            error based convergence...?
-            """
-            # check convergence
+            #ddoy = np.diff(k.doy[k.qa].astype(np.float))
+            dx = np.diff(xs_nir[:, 0])**2
+            #dx[self.qa[1:]][1:]/= ddoy
+            #dx[~self.qa[1:]]=0
+            #self.w[1:] =  (1 + 1e3 * dx)
+            self.w[1:] = (1 + 1e3*dx)
+            #import pdb; pdb.set_trace()#
             """
             two convergence terms
 
@@ -396,7 +377,7 @@ class KSw_vNIR(object):
             critera_2 = np.abs((self.SSE_t - self.SSE_0) / self.SSE_0) < TOL
             #import pdb;pdb.set_trace()
             critera_3 = (np.abs(xs_nir[:, 0] - xs_0)).sum() < TOL
-            # 
+            #
             converged = (critera_1 ==False or critera_2==True) and self.itera > 2
             converged = critera_3
             #converged = self.itera > 10
@@ -509,6 +490,10 @@ class KSw_vNIR(object):
                 HC = np.matmul(Ht, C_t.T)
                 HCHT = HC.reshape((7, 3)).dot(Ht.T)
                 S = self.C_obs + HCHT
+                # i think this is wrong so try
+                HC2 = np.array([Ht.dot(C_t[3*band:(3*band+3), :]) for band in xrange(7)])
+                HCHT2 = HC2.reshape((7, 3)).dot(Ht.T)
+                S2 = self.C_obs + HCHT2
                 """
                 'invert' S
                 """
@@ -521,6 +506,8 @@ class KSw_vNIR(object):
                 for band in xrange(7):
                     K.append(C_t[3*band:(3*band+3), :].dot(Ht.T) * invS[band])
                 K = np.array(K)
+                #import pdb; pdb.set_trace()
+
                 """
                 update
                 """
@@ -543,29 +530,22 @@ class KSw_vNIR(object):
         self.xs[-1]=self.x[-1]
         for t in np.arange(doy.min(), doy.max())[::-1]:
             for band in np.arange(7):
-                C_p_t1 = self.C_p[t+1, 3*band:(3*band+3), :]
-                C_tt = self.C[t,  3*band:(3*band+3), :]
-                """
-                Need the inverse of np.linalg.inv(C_p_t1)
-                """
-                invC = _inverseCov(C_p_t1, invC)
-                #invC = np.linalg.inv(C_p_t1)
-                K_t = C_tt.dot(invC)
-                """
-                calculate adjustment
-                """
+                #import pdb; pdb.set_trace()
+                # egt the Gain
+                P_kk = self.C[t, 3*band:(3*band+3), :]
+                P_k1k = self.C_p[t+1, 3*band:(3*band+3), :]
+                invC = _inverseCov(P_k1k, invC)
+                # the gain is this:
+                K_t = P_kk.dot(invC)
+                # first do solution update
                 xo = self.x[t,  3*band:(3*band+3)]
-                xst_1 = self.xs[t+1, 3*band:(3*band+3)]
-                xp_t = self.x_p[t+1, 3*band:(3*band+3)]
-                diff = xst_1 - xp_t
-                adjustment = K_t.dot(diff)
-                _x_t = xo + adjustment
-                """
-                and covariance update
-                """
-                _Cs = self.Cs[t+1, 3*band:(3*band+3), :]
-                diff = C_p_t1 - _Cs
-                _C_t = C_tt - K_t.dot(diff).dot(K_t.T)
-                self.xs[t, 3*band:(3*band+3)] = _x_t
-                self.Cs[t, 3*band:(3*band+3), :] = _C_t
+                diff = self.xs[t+1, 3*band:(3*band+3)] - self.x_p[t+1, 3*band:(3*band+3)]
+                xs = xo + K_t.dot(diff)
+                # then do covariance
+                P_k1s = self.Cs[t+1, 3*band:(3*band+3), :]
+                diff = P_k1s - P_k1k
+                Ps = P_kk + K_t.dot(diff).dot(K_t.T)
+                #import pdb; pdb.set_trace()
+                self.xs[t, 3*band:(3*band+3)] = xs
+                self.Cs[t, 3*band:(3*band+3), :] = Ps
         #import pdb; pdb.set_trace()

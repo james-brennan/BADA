@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-main_par.py
+main_Aus.py
 
 This runs a section as specified of assumed block size
 
@@ -16,7 +16,7 @@ from fcc import fccModel
 from io_operators import observations, output_handler
 from kernels import Kernels
 from KSw0_vNIR import *
-from pb import Pb_MC, PB2, PB3, PB4
+from pb import  PB2
 import argparse
 import textwrap as _textwrap
 import pylab as plt
@@ -91,9 +91,9 @@ if __name__ == "__main__":
     x1 = options.xmax
     y1 = options.ymax
     if options.ymax == None:
-        y1 = y0 + 20
+        y1 = y0 + 120
     if options.xmax == None:
-        x1 = x0 + 20
+        x1 = x0 + 120
     # force limit just incase
     x1 = np.minimum(x1, 2400)
     y1 = np.minimum(y1, 2400)
@@ -106,7 +106,6 @@ if __name__ == "__main__":
     """
     If the analysis length is less than 120 increase to 120
     """
-    #import pdb; pdb.set_trace()
     if analysis_length < 120:
         date_1 += datetime.timedelta(int((120-analysis_length)/2))
         date_0 -= datetime.timedelta(int((120-analysis_length)/2))
@@ -125,7 +124,7 @@ if __name__ == "__main__":
     logger.setLevel(logging.INFO)
     #logger.addHandler(syslog)
     # create a file handler
-    handler = logging.FileHandler('log.log')
+    handler = logging.FileHandler('aus_log.log')
     handler.setLevel(logging.INFO)
     handler.setFormatter(formatter)
     # add the handlers to the logger
@@ -204,59 +203,70 @@ if __name__ == "__main__":
     fcc_params = -999*np.ones((nT, 3, ys, xs))
     a0 = -999*np.ones((nT, ys, xs))
     a1 = -999*np.ones((nT, ys, xs))
-
+    fcc_unc =  -0*np.ones((nT, 3, 3, ys, xs))
+    rmse =  -999*np.ones((nT, ys, xs))
     t0 = time.time()
     for y in xrange(ys):
         for x in xrange(xs):
             for t in xrange(0, nT-1):
                 pre_iso = state[t, :, y, x]
                 post_iso = state[t+1, :, y, x]
-                pre_unc =  state_unc[t, :, y, x]
-                post_unc =  state_unc[t+1, :, y, x]
+                pre_unc =   state_unc[t, :, y, x]
+                post_unc = state_unc[t+1, :, y, x]
                 try:
-                    #import pdb; pdb.set_trace()
-                    _pb, _fcc, _a0, _a1 = PB2(pre_iso, post_iso, pre_unc, post_unc)
-                    pb2[t+1, y, x] = _pb
+                    _fcc, _a0, _a1, _unc, _rmse = PB2(pre_iso, post_iso, pre_unc, post_unc)
                     fcc_params[t+1, 0, y, x] = _fcc
                     fcc_params[t+1, 1, y, x] = _a0
                     fcc_params[t+1, 2, y, x] = _a1
+                    fcc_unc[t+1, :, :, y, x] = _unc
+                    rmse[t+1, y, x]= _rmse
                 except:
-                    pb2[t+1, y, x] = -998
                     fcc_params[t+1, 0, y, x] =  -998
                     fcc_params[t+1, 1,y, x] =  -998
                     fcc_params[t+1, 2,y, x] =  -998
+                    fcc_unc[t+1, :, :, y, x] = -0
+                    rmse[t+1, y, x]= -1
+
+
 
     t1 = time.time()
     logger.info("fcc/pb calculation took %f seconds" % (t1-t0))
 
-    import pdb; pdb.set_trace()
     # also put into a subdirectory based on dates for multiple tiles...
     logger.info("Going to write files...")
 
-    odir = '/home/users/jbrennan01/DATA2/BADA/tmp/%s/%s_%s/' % (tile, doy0, doy1)
+    odir = '/home/users/jbrennan01/DATA2/BADA/ausTest/%s/' % (tile)
     if not os.path.exists(odir):
         os.makedirs(odir)
 
+    """
+    We only want to write the max pb outcome
+    and the fcc, a0, a1 values for these...
 
-    pbMax = np.nanmax(pb2, axis=0)
-    pbMax = np.nanmax(pb2, axis=0)
-    cc = np.ma.array(data=pb2, mask=~np.isfinite(pb2) )
+    Take off the wings where stuff messes up often
+    """
+
+    fccMax = np.nanmax(fcc_params[16:-16, 0], axis=0)
+    cc = np.ma.array(data=fcc_params[16:-16, 0], mask=~np.isfinite(fcc_params[16:-16, 0]) )
     idx = cc.argmax(axis=0)
+    # store stuff
     fcc_parB = -999*np.ones((3, ys, xs))
+    fcc_uncB = -999*np.ones((3, ys, xs))
+    rmseB = -999*np.ones((ys, xs))
+
     for y in xrange(ys):
         for x in xrange(xs):
-           fcc_parB[:, y, x] = fcc_params[idx[y,x], :, y, x]
+           fcc_parB[:, y, x] = fcc_params[16:-16][idx[y,x], :, y, x]
+           fcc_uncB[:, y, x] = np.diag(fcc_unc[16:-16][idx[y,x], :,:, y, x])
+           rmseB[y,x] = rmse[16:-16][idx[y,x], y, x]
 
-    #np.save(odir+"%s_iters_%i_%i_%s_%s" % (tile, y0, x0, doy0, doy1), iters)
-    #np.save(odir+"%s_fcc_%i_%i_%s_%s" % (tile, y0, x0, doy0, doy1), fcc_parB)
-    #np.save(odir+"%s_pb2_%i_%i_%s_%s" % (tile, y0, x0, doy0, doy1), pbMax)
-    # finish logging
-    #logger.info("Files written. BADA finished. ")
+    #import pdb; pdb.set_trace()
 
-
-
+    #import pdb; pdb.set_trace()
     np.save(odir+"%s_iters_%i_%i_%s_%s" % (tile, y0, x0, doy0, doy1), iters)
-    np.save(odir+"%s_fcc_%i_%i_%s_%s" % (tile, y0, x0, doy0, doy1), fcc_params)
-    np.save(odir+"%s_pb2_%i_%i_%s_%s" % (tile, y0, x0, doy0, doy1), pb2)
-    ## finish logging
+    np.save(odir+"%s_fcc_%i_%i_%s_%s" % (tile, y0, x0, doy0, doy1), fcc_parB)
+    np.save(odir+"%s_fccunc_%i_%i_%s_%s" % (tile, y0, x0, doy0, doy1), fcc_uncB)
+    np.save(odir+"%s_rmse_%i_%i_%s_%s" % (tile, y0, x0, doy0, doy1), rmseB)
+    np.save(odir+"%s_dob_%i_%i_%s_%s" % (tile, y0, x0, doy0, doy1), idx)
+    # finish logging
     logger.info("Files written. BADA finished. ")
